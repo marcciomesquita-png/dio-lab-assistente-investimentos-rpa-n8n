@@ -121,6 +121,40 @@ O notebook valida a URL antes de rodar e interrompe com mensagem clara se ela n�
 
 ---
 
+---
+
+## Execução validada
+
+![Execução do workflow no n8n](docs/evidencia-execucao.png)
+
+Workflow publicado, execução concluída em 267 ms, os seis nós percorridos sem falha.
+
+Saída da execução com os dados reais da página:
+
+```
+Clientes encontrados: 10
+Status: 200
+ok: True | total_clientes: 10 | total_investimentos: 9
+resumo_por_motivo: {"saldo_ok": 10}
+
+  Ana Silva          Conservador   R$ 12.500,00  ->  CDB Liquidez Diária
+  Bruno Lima         Moderado       R$  3.200,00  ->  CDB Prefixado
+  Carla Souza        Arrojado      R$ 28.900,00  ->  Fundo de Ações
+  Daniel Oliveira    Conservador   R$    850,00  ->  Tesouro Selic
+  Elena Rodrigues    Arrojado      R$ 45.000,00  ->  Fundo de Ações
+  Felipe Santos      Moderado      R$  7.800,00  ->  Fundo Multimercado
+  Gabriela Costa     Conservador   R$  1.500,00  ->  CDB Liquidez Diária
+  Henrique Alves     Moderado      R$ 22.300,00  ->  Fundo Multimercado
+  Isabela Martins    Conservador   R$    500,00  ->  Tesouro Selic
+  João Pereira       Arrojado      R$ 15.000,00  ->  Fundo de Ações
+```
+
+Exemplo de mensagem gerada:
+
+> Olá Ana Silva! Pelo seu perfil (Conservador), uma boa opção é **CDB Liquidez Diária**
+> (mínimo R$ 1.000,00). Com seu saldo atual (R$ 12.500,00), você já consegue investir.
+> Rentabilidade: 12.5%.
+
 ## Escopo
 
 Implementado o **MVP** do desafio: fluxo completo com **mensagens estáticas por template**.
