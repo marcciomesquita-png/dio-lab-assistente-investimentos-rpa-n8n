@@ -1,0 +1,160 @@
+{
+  "name": "Assistente de Investimentos - RPA + n8n",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -220,
+        0
+      ],
+      "webhookId": "a1000000-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Buscar CSV de Investimentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recebe o CSV cru do nó HTTP Request e devolve a lista de investimentos.\n// O nó HTTP pode entregar o conteúdo em \"data\", em \"body\" ou no próprio json,\n// dependendo da versão — por isso os três fallbacks.\nconst csvCru = $json.data ?? $json.body ?? $json;\nconst texto = (typeof csvCru === \"string\") ? csvCru : JSON.stringify(csvCru);\n\nconst linhas = texto.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);\n\nif (linhas.length < 2) {\n  throw new Error(\"CSV vazio ou sem linhas de dados. Confira a URL do HTTP Request.\");\n}\n\nconst cabecalho = linhas[0].split(\",\").map(h => h.trim());\n\nconst investimentos = linhas.slice(1).map(linha => {\n  const colunas = linha.split(\",\").map(c => c.trim());\n  const obj = {};\n  cabecalho.forEach((h, i) => { obj[h] = colunas[i] ?? \"\"; });\n\n  // \"1000\" e \"R$ 1.000\" viram 1000. Sem isso a comparação com o saldo é texto\n  // contra número e falha em silêncio.\n  obj.minimo = Number(String(obj.minimo).replace(/[^\\d]/g, \"\")) || 0;\n\n  return obj;\n});\n\nreturn [{ json: { investimentos } }];\n"
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Parse do CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cruza os clientes recebidos pelo Webhook com as opções de investimento do CSV\n// e monta a mensagem de cada um. Mensagens ESTÁTICAS, por template — é o que o\n// MVP do desafio pede. A versão com LLM é o desafio extra.\n\nconst entrada = $input.first().json;\n\nconst clientes = entrada.body?.clientes ?? entrada.clientes ?? [];\nconst investimentos = entrada.investimentos ?? [];\n\nif (clientes.length === 0) {\n  throw new Error(\"Nenhum cliente recebido. Confira se o POST do RPA chegou no Webhook.\");\n}\nif (investimentos.length === 0) {\n  throw new Error(\"Nenhum investimento carregado. Confira o HTTP Request e o nó de parse do CSV.\");\n}\n\n// \"R$ 12.500,00\" -> 12500\n// O ponto é separador de milhar e a vírgula é decimal: trocar na ordem errada\n// transforma 12.500,00 em 12,5 e quebra toda a comparação.\nfunction saldoParaNumero(texto) {\n  if (typeof texto === \"number\") return texto;\n  const limpo = String(texto ?? \"\")\n    .replace(/[^\\d.,-]/g, \"\")\n    .replace(/\\./g, \"\")\n    .replace(\",\", \".\");\n  const n = Number(limpo);\n  return Number.isFinite(n) ? n : 0;\n}\n\nfunction chavePerfil(p) {\n  return String(p ?? \"\")\n    .trim()\n    .toLowerCase()\n    .normalize(\"NFD\")\n    .replace(/[̀-ͯ]/g, \"\");\n}\n\nfunction moeda(n) {\n  return n.toLocaleString(\"pt-BR\", { style: \"currency\", currency: \"BRL\" });\n}\n\nfunction montarMensagens(cliente, produto, motivo) {\n  const { nome, perfil } = cliente;\n  const saldo = cliente.saldo_texto;\n\n  if (motivo === \"saldo_insuficiente\") {\n    return [\n      `Olá ${nome}! Pelo seu perfil (${perfil}), uma boa porta de entrada é **${produto.produto}**, que começa em ${moeda(produto.minimo)}. Seu saldo hoje é de ${saldo} — falta pouco para chegar lá. Rentabilidade: ${produto.rentabilidade}.`,\n      `Oi ${nome}! Separamos **${produto.produto}** como próximo passo para o perfil ${perfil}. A aplicação mínima é ${moeda(produto.minimo)} e seu saldo atual é ${saldo}. Rentabilidade: ${produto.rentabilidade}.`,\n      `${nome}, indo direto ao ponto: a opção mais acessível do perfil ${perfil} é **${produto.produto}**, a partir de ${moeda(produto.minimo)}. Com ${saldo}, vale montar um plano para alcançar esse valor. Rentabilidade: ${produto.rentabilidade}.`,\n    ];\n  }\n\n  if (motivo === \"perfil_sem_produto\") {\n    return [\n      `Olá ${nome}! Ainda não temos opção cadastrada para o perfil ${perfil}. Um especialista vai entrar em contato.`,\n    ];\n  }\n\n  return [\n    `Olá ${nome}! Pelo seu perfil (${perfil}), uma boa opção é **${produto.produto}** (mínimo ${moeda(produto.minimo)}). Com seu saldo atual (${saldo}), você já consegue investir. Rentabilidade: ${produto.rentabilidade}.`,\n    `Oi ${nome}! Recomendação para perfil ${perfil}: **${produto.produto}** (mínimo ${moeda(produto.minimo)}). Seu saldo (${saldo}) já atende o mínimo. Rentabilidade: ${produto.rentabilidade}.`,\n    `${nome}, indo direto ao ponto: para o perfil ${perfil}, **${produto.produto}** (mínimo ${moeda(produto.minimo)}). Você tem ${saldo}, então já dá para aplicar. Rentabilidade: ${produto.rentabilidade}.`,\n  ];\n}\n\n// Escolhe sempre a primeira variação. Fica determinístico: rodar duas vezes\n// com a mesma entrada produz a mesma saída, o que torna o fluxo testável.\nfunction escolher(mensagens) {\n  return mensagens[0];\n}\n\nconst resultados = clientes.map((c) => {\n  const perfil = c.perfil;\n  const saldoNum = saldoParaNumero(c.saldo);\n\n  const doPerfil = investimentos.filter(i => chavePerfil(i.perfil) === chavePerfil(perfil));\n  const acessiveis = doPerfil.filter(i => saldoNum >= Number(i.minimo || 0));\n\n  let escolhido = null;\n  let motivo = \"\";\n\n  if (doPerfil.length === 0) {\n    motivo = \"perfil_sem_produto\";\n  } else if (acessiveis.length > 0) {\n    // Entre os que o saldo alcança, o de maior aplicação mínima — é o mais\n    // completo da faixa, e o cliente já tem dinheiro para ele.\n    escolhido = acessiveis.reduce((a, b) => (Number(b.minimo) > Number(a.minimo) ? b : a));\n    motivo = \"saldo_ok\";\n  } else {\n    // Nenhum alcançado: sugere o de menor entrada, como meta.\n    escolhido = doPerfil.reduce((a, b) => (Number(b.minimo) < Number(a.minimo) ? b : a));\n    motivo = \"saldo_insuficiente\";\n  }\n\n  const base = { nome: c.nome, perfil, saldo_texto: c.saldo };\n  const mensagens = montarMensagens(base, escolhido ?? {}, motivo);\n\n  return {\n    nome: c.nome,\n    email: c.email,\n    perfil,\n    saldo_texto: c.saldo,\n    saldo_num: saldoNum,\n    recomendacao: escolhido,\n    motivo,\n    mensagens,\n    mensagem_escolhida: escolher(mensagens),\n  };\n});\n\nreturn [{\n  json: {\n    ok: true,\n    total_clientes: resultados.length,\n    total_investimentos: investimentos.length,\n    resumo_por_motivo: resultados.reduce((acc, r) => {\n      acc[r.motivo] = (acc[r.motivo] || 0) + 1;\n      return acc;\n    }, {}),\n    resultados,\n  },\n}];\n"
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Cruzar e Gerar Mensagens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Buscar CSV de Investimentos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar CSV de Investimentos": {
+      "main": [
+        [
+          {
+            "node": "Parse do CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse do CSV": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Cruzar e Gerar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cruzar e Gerar Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
